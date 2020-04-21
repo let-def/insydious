@@ -9,7 +9,7 @@ My friend's Acer computer suddenly stopped working one day. We assume it is rela
 
 The first problem was due to the mode used to expose the NVME controller, "AHCI" or "RST with Optane" on this Acer laptop. Linux kernel only supports "AHCI" mode. Our best guess was that the communication mode switched to RST with Optane over night.
 
-Anyway, the whole situation did not make sense: restricted access and locked into a protocol incompatible with the only operating system installed on that laptop. Entering a wrong password three times led us to an "Unlock password" screen. Looking up internet revealed that we could recover access to BIOS/UEFI if we could get pass that screen.
+Anyway, the whole situation did not make sense: restricted access and locked into a protocol incompatible with the only operating system installed on that laptop. Entering a wrong password three times led us to an "Unlock password" screen. Looking up internet revealed that we could recover access to BIOS/UEFI if we could get past that screen.
 
 Contacting Acer did not help much: as Linux users we were not welcome, and there was not such thing as unlocking. We had to send them the computer and pay for service intervention. WTF moment.
 
