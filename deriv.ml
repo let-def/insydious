@@ -56,7 +56,9 @@ let array_copy = Array.copy
     !acc
 *)
 
-let pass_1_secret_1 = [|
+(* Pass 1: (almost certainly...) sha256 *)
+
+let sha256_constants: int array = [|
   0x428A2F98; 0x71374491; 0xB5C0FBCF; 0xE9B5DBA5;
   0x3956C25B; 0x59F111F1; 0x923F82A4; 0xAB1C5ED5;
   0xD807AA98; 0x12835B01; 0x243185BE; 0x550C7DC3;
@@ -75,12 +77,13 @@ let pass_1_secret_1 = [|
   0x90BEFFFA; 0xA4506CEB; 0xBEF9A3F7; 0xC67178F2;
 |]
 
-let pass_1_secret_2 = [|
+let sha256_iv: int array = [|
   0x6A09E667; 0xBB67AE85; 0x3C6EF372; 0xA54FF53A;
   0x510E527F; 0x9B05688C; 0x1F83D9AB; 0x5BE0CD19;
 |]
 
-let pass_1 key =
+(* Specialised for 10 bytes key *)
+let sha256 (key: int array): int array =
   let obuf = Array.make 64 0 in
   for i = 0 to 9 do set_uint8 obuf i (key.(i)); done;
   set_uint8 obuf 10 0x80;
@@ -103,14 +106,14 @@ let pass_1 key =
       (tmp.(i - 0x07) + (t0_1 lxor t0_2 lxor t0_3) +
        tmp.(i - 0x10) + (td_1 lxor td_2 lxor td_3))
   done;
-  let sbuf = array_copy pass_1_secret_2 in
+  let sbuf = array_copy sha256_iv in
   for i = 0 to 63 do
     let s6 = sbuf.(6) in
     let s5 = sbuf.(5) in
     let s4 = sbuf.(4) in
     let tmp =
       int32 @@
-      pass_1_secret_1.(i) + tmp.(i) + sbuf.(7) +
+      sha256_constants.(i) + tmp.(i) + sbuf.(7) +
       ((lnot s4 land s6) lxor (s5 land s4)) +
       (slr s4 0x15 0x0b lxor slr s4 0x07 0x19 lxor slr s4 0x1a 0x06)
     in
@@ -125,11 +128,13 @@ let pass_1 key =
   done;
   let result = Array.make 32 0 in
   for i = 0 to 7 do
-    set_int32_be result (i * 4) (sbuf.(i) + pass_1_secret_2.(i))
+    set_int32_be result (i * 4) (sbuf.(i) + sha256_iv.(i))
   done;
   result
 
-let pass_2_permutation = [|
+(* Pass 2: AES-like, probably with custom sauce? *)
+
+let rijndael_sbox: int array = [|
   0x63;0x7C;0x77;0x7B;0xF2;0x6B;0x6F;0xC5;0x30;0x01;0x67;0x2B;0xFE;0xD7;0xAB;0x76;
   0xCA;0x82;0xC9;0x7D;0xFA;0x59;0x47;0xF0;0xAD;0xD4;0xA2;0xAF;0x9C;0xA4;0x72;0xC0;
   0xB7;0xFD;0x93;0x26;0x36;0x3F;0xF7;0xCC;0x34;0xA5;0xE5;0xF1;0x71;0xD8;0x31;0x15;
@@ -148,16 +153,16 @@ let pass_2_permutation = [|
   0x8C;0xA1;0x89;0x0D;0xBF;0xE6;0x42;0x68;0x41;0x99;0x2D;0x0F;0xB0;0x54;0xBB;0x16;
 |]
 
-let pass_2_secret =
+let pass_2_secret: int array =
   [| 0x8D;0x01;0x02;0x04;0x08;0x10;0x20;0x40;
      0x80;0x1B;0x36;0x6C;0xD8;0xAB;0x4D;0x9A |]
 
-let pass_2_1 input =
+let pass_2_1 (input: int array): int array =
   let len = Array.length input in
   let idx = input.(9) land 0xf in
   array_init 16 (fun i -> input.((mul i (idx * 2 + 1)) mod len))
 
-let pass_2_2 input =
+let pass_2_2 (input: int array): int array =
   array_init 16 (fun idx ->
       let i = idx lsr 2 and j = idx land 3 in
       let acc = ref 0 in
@@ -168,26 +173,26 @@ let pass_2_2 input =
       !acc land 0xFF
     )
 
-let pass_2_switch_0 input =
+let pass_2_switch_0 (input: int array): int array =
   array_init 16 (fun idx ->
       let i = 3 - idx lsr 2 and j = idx land 3 in
       input.(j * 4 + i)
     )
 
-let pass_2_switch_1 input =
+let pass_2_switch_1 (input: int array): int array =
   array_init 16 (fun idx ->
       let i = idx lsr 2 and j = 3 - idx land 3 in
       input.(j * 4 + i)
     )
 
-let pass_2_switch_2 input =
+let pass_2_switch_2 (input: int array): int array =
   array_init 16 (fun idx ->
       let i = idx lsr 2 and j = idx land 3 in
       let c = input.((j + i) land 3 + i * 4) in
       ((c + i) land 0xFF)
     )
 
-let pass_2_switch_3 input =
+let pass_2_switch_3 (input: int array): int array =
   let acc1 = ref 0 and acc2 = ref 0 in
   for i = 0 to 3 do
     acc1 := !acc1 lxor input.(i * 5);
@@ -197,13 +202,13 @@ let pass_2_switch_3 input =
   array_init 16
     (fun i -> input.(i) lxor (if i land 1 = 0 then acc1 else acc2))
 
-let pass_2_switch_4 input =
+let pass_2_switch_4 (input: int array): int array =
   array_init 16 (fun i ->
       let c1 = input.(i) and c2 = input.((i+1) land 0xF) in
       c1 lxor (if c2 < c1 then c2 else 0xFF)
     )
 
-let pass_2_switch_5 input =
+let pass_2_switch_5 (input: int array): int array =
   let buf = Array.make 16 0 in
   for i = 0 to 3 do
     let acc = ref 0 in
@@ -215,13 +220,15 @@ let pass_2_switch_5 input =
   done;
   buf
 
-let pass_2_3 scratch buf offset =
+let pass_2_3 (scratch: int array) (buf: int array) (offset: int): unit =
   let o = (offset land 0xFF) lsl 4 in
   for i = 0 to 15 do
-    set_uint8 buf i (get_uint8 buf i lxor get_uint8 scratch (o + i)) done
+    set_uint8 buf i
+      (get_uint8 buf i lxor get_uint8 scratch (o + i))
+  done
 
-let pass_2_permute buf =
-  for i = 0 to 15 do set_uint8 buf i pass_2_permutation.(get_uint8 buf i) done;
+let pass_2_permute (buf: int array): unit =
+  for i = 0 to 15 do set_uint8 buf i rijndael_sbox.(get_uint8 buf i) done;
   let b01 = get_uint8 buf 0x01 in
   set_uint8 buf 0x01 (get_uint8 buf 0x05);
   set_uint8 buf 0x05 (get_uint8 buf 0x09);
@@ -241,7 +248,7 @@ let pass_2_permute buf =
   set_uint8 buf 0x07 b03;
   set_uint8 buf 0x0b b07
 
-let pass_2_4 scratch input =
+let pass_2_4 (scratch: int array) (input: int array): int array =
   let buf = array_copy input in
   pass_2_3 scratch buf 0;
   for i = 1 to 9 do
@@ -272,7 +279,7 @@ let pass_2_4 scratch input =
   pass_2_3 scratch buf 10;
   buf
 
-let pass_2 input =
+let pass_2 (input: int array): int array =
   let scram_1 = pass_2_1 input in
   let scram_2 =
     let scram_2 = pass_2_2 input in
@@ -294,10 +301,10 @@ let pass_2 input =
     let b3 = get_uint8 scratch (i - 1) in
     let b0, b1, b2, b3 =
       if (i land 12) = 0 then (
-        get_uint8 pass_2_permutation b1 lxor get_uint8 pass_2_secret (i / 16),
-        get_uint8 pass_2_permutation b2,
-        get_uint8 pass_2_permutation b3,
-        get_uint8 pass_2_permutation b0
+        get_uint8 rijndael_sbox b1 lxor get_uint8 pass_2_secret (i / 16),
+        get_uint8 rijndael_sbox b2,
+        get_uint8 rijndael_sbox b3,
+        get_uint8 rijndael_sbox b0
       ) else
         (b0, b1, b2, b3)
     in
@@ -308,11 +315,13 @@ let pass_2 input =
   done;
   pass_2_4 scratch scram_1
 
-let pass_3_secret_hi = 0xC96C5795
+(* Pass 3: (almost certainly...) CRC64 *)
 
-let pass_3_secret_lo = 0xD7870F42
+let crc64_hi: int = 0xC96C5795
 
-let pass_3_derived =
+let crc64_lo: int = 0xD7870F42
+
+let crc64_table: int array =
   let arr = Array.make 512 0 in
   for i = 0 to 255 do
     let acc1 = ref 0 in
@@ -324,8 +333,8 @@ let pass_3_derived =
         acc1 := acc1';
         acc2 := acc2';
       ) else (
-        acc1 := acc1' lxor pass_3_secret_hi;
-        acc2 := acc2' lxor pass_3_secret_lo;
+        acc1 := acc1' lxor crc64_hi;
+        acc2 := acc2' lxor crc64_lo;
       )
     done;
     arr.(2 * i + 0) <- !acc1;
@@ -333,7 +342,7 @@ let pass_3_derived =
   done;
   arr
 
-let pass_3 input =
+let crc64 (input: int array): int array =
   let acc1 = ref 0 in
   let acc2 = ref 0 in
   for i = 0 to 15 do
@@ -341,8 +350,8 @@ let pass_3 input =
     let acc1' = (!acc1 lsr 8) in
     let acc2' = (!acc2 lsr 8) lor ((!acc1 land 0xFF) lsl 24) in
     let ofs = (!acc2 land 0xFF) lxor c in
-    acc1 := acc1' lxor pass_3_derived.(ofs * 2 + 0);
-    acc2 := acc2' lxor pass_3_derived.(ofs * 2 + 1);
+    acc1 := acc1' lxor crc64_table.(ofs * 2 + 0);
+    acc2 := acc2' lxor crc64_table.(ofs * 2 + 1);
   done;
   let acc1 = !acc1 and acc2 = !acc2 in
   let result = Array.make 8 0 in
@@ -350,17 +359,15 @@ let pass_3 input =
   set_int32_be result 4 acc2;
   result
 
-let raw_unlock key =
-  pass_3 (pass_2 (pass_1 key))
+let raw_unlock (key: int array): int array =
+  crc64 (pass_2 (sha256 key))
 
-let to_hex c =
+let to_hex (c: int): char =
   Char.chr (if c <= 9 then Char.code '0' + c else Char.code 'a' + c - 10)
 
-open Js_of_ocaml
-
-let unlock str =
+let unlock (str: string): string =
   let array str = Array.init (String.length str) (fun i -> Char.code str.[i]) in
-  let code = str |> Js.to_string |> array |> raw_unlock in
+  let code = raw_unlock (array str) in
   let bytes = Bytes.make 16 '\000' in
   for i = 0 to 7 do
     let c = code.(i) in
@@ -368,6 +375,8 @@ let unlock str =
     Bytes.set bytes (2 * i + 0) (to_hex c0);
     Bytes.set bytes (2 * i + 1) (to_hex c1);
   done;
-  Js.string (Bytes.to_string bytes)
+  Bytes.to_string bytes
 
-let () = Js.export "unlock" unlock
+let () =
+  let open Js_of_ocaml in
+  Js.export "unlock" (fun key -> Js.string (unlock (Js.to_string  key)))
